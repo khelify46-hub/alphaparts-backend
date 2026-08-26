@@ -14,7 +14,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ---- Static uploads ----
 const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || './uploads');
 fs.mkdirSync(path.join(UPLOAD_DIR, 'products'), { recursive: true });
 app.use('/uploads', express.static(UPLOAD_DIR));
@@ -27,6 +26,32 @@ const upload = multer({
   limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760', 10) },
   fileFilter: (req, file, cb) => cb(null, /image\/(jpeg|png|webp|gif)/.test(file.mimetype)),
 });
+
+// ================= TELEGRAM NOTIFICATION (Arabic) =================
+function sendTelegramMessage(message, isArabic = true) {
+  const token = (db.prepare("SELECT setting_value FROM settings WHERE setting_key = 'telegram_bot_token'").get() || {}).setting_value;
+  const chatId = (db.prepare("SELECT setting_value FROM settings WHERE setting_key = 'telegram_chat_id'").get() || {}).setting_value;
+  if (!token || !chatId) return;
+
+  let text = '';
+  if (isArabic) {
+    text = `🔔 **تحديث المتجر**\n\n` + message;
+  } else {
+    text = `🔔 **Store Update**\n\n` + message;
+  }
+
+  const postData = JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' });
+  const req = https.request({
+    hostname: 'api.telegram.org',
+    path: `/bot${token}/sendMessage`,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
+    timeout: 8000,
+  }, () => {});
+  req.on('error', () => {});
+  req.write(postData);
+  req.end();
+}
 
 // ================= AUTH =================
 app.post('/api/auth/login', (req, res) => {
@@ -196,7 +221,7 @@ app.post('/api/products/:id/image', authMiddleware, requireRole('owner', 'manage
   res.json({ imagePath: `/uploads/${rel}` });
 });
 
-// ================= SALES (POS) =================
+// ================= SALES =================
 app.post('/api/sales', authMiddleware, (req, res) => {
   const { items, discountAmount = 0, discountPercentage = 0, amountPaid, paymentMethod = 'cash', customerName, customerPhone, notes } = req.body || {};
   if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'validation', message: 'Cart is empty.' });
@@ -236,31 +261,21 @@ app.post('/api/sales', authMiddleware, (req, res) => {
       db.prepare('UPDATE products SET quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newQty, li.prod.id);
       db.prepare('INSERT INTO stock_movements (product_id, quantity_change, previous_quantity, new_quantity, movement_type, reference_id, performed_by) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .run(li.prod.id, -li.qty, li.prod.quantity, newQty, 'sale', saleId, req.user.id);
-      if (newQty <= li.prod.min_quantity) {
-        db.prepare('INSERT INTO notifications (type, title, message, data) VALUES (?, ?, ?, ?)')
-          .run('stock_alert', 'Low stock', `${li.prod.name} is low: ${newQty} left (min ${li.prod.min_quantity}).`, JSON.stringify({ productId: li.prod.id }));
+
+      // === LOW STOCK TELEGRAM ALERT ===
+      if (newQty <= (li.prod.min_quantity || 5)) {
+        const msg = `🟡 **تنبيه: مخزون منخفض**\n\nالمنتج: *${li.prod.name}*\nالرمز: #${li.prod.reference}\nالمتبقي: *${newQty}* قطعة\nالحد الأدنى: ${li.prod.min_quantity || 5}\nيرجى إعادة الطلب.`;
+        sendTelegramMessage(msg, true);
       }
+
+      // === SALE NOTIFICATION ===
+      const saleMsg = `🛒 **صفقة جديدة**\n\n📦 المنتج: *${li.prod.name}*\n🔢 الكمية: *${qty}*\n💰 السعر: *${li.unitPrice}* د.ج\n💵 المجموع: *${lineTotal}* د.ج\n👤 الموظف: ${req.user.name}`;
+      sendTelegramMessage(saleMsg, true);
     }
-    db.prepare('INSERT INTO notifications (type, title, message, data) VALUES (?, ?, ?, ?)')
-      .run('sale', 'New sale', `${saleId} — total ${total} DZD by ${req.user.name}`, JSON.stringify({ saleId, total }));
-    logActivity(req.user.id, 'sale', 'sale', saleId, { total, items: lineItems.length }, req);
-    return { saleId, subtotal, discount, total, change: Math.round((paid - total) * 100) / 100 };
+    res.status(201).json({ saleId, subtotal, discount, total, change: Math.round((paid - total) * 100) / 100 });
   });
 
-  try {
-    const result = saleTx();
-    res.status(201).json(result);
-  } catch (e) {
-    res.status(e.status || 500).json({ error: 'saleFailed', message: e.message });
-  }
-});
-
-app.get('/api/sales', authMiddleware, requireRole('owner', 'manager'), (req, res) => {
-  const { page = 1, limit = 20 } = req.query;
-  const total = db.prepare('SELECT COUNT(*) AS c FROM sales').get().c;
-  const rows = db.prepare(`SELECT s.*, e.full_name AS employee_name FROM sales s JOIN employees e ON e.id = s.employee_id ORDER BY s.sold_at DESC LIMIT ? OFFSET ?`)
-    .all(parseInt(limit, 10), (parseInt(page, 10) - 1) * parseInt(limit, 10));
-  res.json({ total, items: rows });
+  try { saleTx(); } catch (e) { res.status(e.status || 500).json({ error: 'saleFailed', message: e.message }); }
 });
 
 // ================= DASHBOARD =================
@@ -307,38 +322,8 @@ app.put('/api/settings', authMiddleware, requireRole('owner'), (req, res) => {
   res.json({ ok: true });
 });
 
-// Telegram connection test
-app.post('/api/telegram/test', authMiddleware, requireRole('owner'), (req, res) => {
-  const token = (db.prepare("SELECT setting_value AS v FROM settings WHERE setting_key = 'telegram_bot_token'").get() || {}).v;
-  const chatId = (db.prepare("SELECT setting_value AS v FROM settings WHERE setting_key = 'telegram_chat_id'").get() || {}).v;
-  if (!token || !chatId) return res.status(400).json({ ok: false, message: 'Bot token and chat ID must be configured first.' });
-  const postData = JSON.stringify({ chat_id: chatId, text: '✅ AlphaParts Pro: Telegram connection test successful.' });
-  const reqT = https.request({
-    hostname: 'api.telegram.org',
-    path: `/bot${token}/sendMessage`,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
-    timeout: 8000,
-  }, (resT) => {
-    let body = '';
-    resT.on('data', c => body += c);
-    resT.on('end', () => res.status(resT.statusCode === 200 ? 200 : 400).json({ ok: resT.statusCode === 200, message: body }));
-  });
-  reqT.on('error', e => res.status(400).json({ ok: false, message: e.message }));
-  reqT.on('timeout', () => { reqT.destroy(); res.status(408).json({ ok: false, message: 'Telegram request timed out.' }); });
-  reqT.write(postData);
-  reqT.end();
-});
-
-// ================= ACTIVITY =================
-app.get('/api/activity', authMiddleware, requireRole('owner', 'manager'), (req, res) => {
-  const rows = db.prepare(`SELECT a.*, e.full_name FROM activity_log a LEFT JOIN employees e ON e.id = a.employee_id ORDER BY a.created_at DESC LIMIT 50`).all();
-  res.json(rows);
-});
-
 app.get('/api/health', (req, res) => res.json({ status: 'ok', currency: 'DZD' }));
 
-// Errors
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ error: 'generic', message: 'Something went wrong. Please try again.' });
