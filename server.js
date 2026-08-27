@@ -14,8 +14,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// UPLOADS FOLDER
 const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || './uploads');
 fs.mkdirSync(path.join(UPLOAD_DIR, 'products'), { recursive: true });
+// Serve uploaded files with full URL
 app.use('/uploads', express.static(UPLOAD_DIR));
 
 const upload = multer({
@@ -27,7 +29,7 @@ const upload = multer({
   fileFilter: (req, file, cb) => cb(null, /image\/(jpeg|png|webp|gif)/.test(file.mimetype)),
 });
 
-// ================= TELEGRAM NOTIFICATION =================
+// ================= TELEGRAM =================
 function sendTelegramMessage(shopId, message) {
   const settings = db.prepare('SELECT setting_value FROM settings WHERE shop_id = ? AND setting_key = ?');
   const token = (settings.get(shopId, 'telegram_bot_token') || {}).setting_value;
@@ -48,7 +50,7 @@ function sendTelegramMessage(shopId, message) {
   req.end();
 }
 
-// ================= REGISTER SHOP =================
+// ================= REGISTER =================
 app.post('/api/register', (req, res) => {
   const { shopName, ownerName, email, password } = req.body || {};
   if (!shopName || !ownerName || !email || !password) {
@@ -71,15 +73,10 @@ app.post('/api/register', (req, res) => {
   const employeeId = nextEmployeeId();
 
   const tx = db.transaction(() => {
-    // Create shop
     const shopInfo = db.prepare('INSERT INTO shops (shop_code, shop_name, owner_email) VALUES (?, ?, ?)')
       .run(shopCode, shopName, String(email).toLowerCase().trim());
-
-    // Create owner employee
     db.prepare('INSERT INTO employees (employee_id, shop_id, full_name, email, password_hash, role) VALUES (?, ?, ?, ?, ?, ?)')
       .run(employeeId, shopInfo.lastInsertRowid, ownerName, String(email).toLowerCase().trim(), passwordHash, 'owner');
-
-    // Add default settings
     const defaultSettings = [
       ['app_language', 'en', 'general'],
       ['app_theme', 'light', 'theme'],
@@ -93,17 +90,12 @@ app.post('/api/register', (req, res) => {
     for (const [key, value, group] of defaultSettings) {
       stmt.run(shopInfo.lastInsertRowid, key, value, group);
     }
-
     return { shopId: shopInfo.lastInsertRowid, shopCode };
   });
 
   try {
     const result = tx();
-    res.status(201).json({
-      ok: true,
-      shopCode: result.shopCode,
-      message: 'Shop created successfully!'
-    });
+    res.status(201).json({ ok: true, shopCode: result.shopCode, message: 'Shop created successfully!' });
   } catch (e) {
     res.status(500).json({ error: 'server', message: e.message });
   }
@@ -359,13 +351,11 @@ app.post('/api/sales', authMiddleware, (req, res) => {
       db.prepare('INSERT INTO stock_movements (product_id, quantity_change, previous_quantity, new_quantity, movement_type, reference_id, performed_by) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .run(li.prod.id, -li.qty, li.prod.quantity, newQty, 'sale', saleId, req.user.id);
 
-      // LOW STOCK ALERT (Arabic)
       if (newQty <= (li.prod.min_quantity || 5)) {
         const msg = `⚠️ **تحذير: مخزون منخفض**\n\nالمنتج: *${li.prod.name}*\nالرمز: #${li.prod.reference}\nالمتبقي: *${newQty}* قطعة\nالحد الأدنى: ${li.prod.min_quantity || 5}\nيرجى إعادة الطلب فوراً.`;
         lowStockAlerts.push(msg);
       }
 
-      // SALE NOTIFICATION (Arabic)
       const saleMsg = `🛒 **صفقة جديدة**\n\n📦 المنتج: *${li.prod.name}*\n🔢 الكمية: *${qty}*\n💰 السعر: *${li.unitPrice}* د.ج\n💵 المجموع: *${lineTotal}* د.ج\n👤 الموظف: ${req.user.fullName || 'موظف'}`;
       sendTelegramMessage(req.user.shopId, saleMsg);
     }
