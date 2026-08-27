@@ -2,8 +2,6 @@ const Database = require('better-sqlite3');
 const path = require('path');
 
 const db = new Database(path.join(__dirname, 'shop.db'));
-
-// Enable foreign keys
 db.pragma('foreign_keys = ON');
 
 // ========== SHOPS TABLE ==========
