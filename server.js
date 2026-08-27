@@ -14,10 +14,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// UPLOADS FOLDER
 const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || './uploads');
 fs.mkdirSync(path.join(UPLOAD_DIR, 'products'), { recursive: true });
-// Serve uploaded files with full URL
 app.use('/uploads', express.static(UPLOAD_DIR));
 
 const upload = multer({
@@ -29,7 +27,6 @@ const upload = multer({
   fileFilter: (req, file, cb) => cb(null, /image\/(jpeg|png|webp|gif)/.test(file.mimetype)),
 });
 
-// ================= TELEGRAM =================
 function sendTelegramMessage(shopId, message) {
   const settings = db.prepare('SELECT setting_value FROM settings WHERE shop_id = ? AND setting_key = ?');
   const token = (settings.get(shopId, 'telegram_bot_token') || {}).setting_value;
@@ -50,7 +47,6 @@ function sendTelegramMessage(shopId, message) {
   req.end();
 }
 
-// ================= REGISTER =================
 app.post('/api/register', (req, res) => {
   const { shopName, ownerName, email, password } = req.body || {};
   if (!shopName || !ownerName || !email || !password) {
@@ -101,7 +97,6 @@ app.post('/api/register', (req, res) => {
   }
 });
 
-// ================= LOGIN =================
 app.post('/api/auth/login', (req, res) => {
   const { email, password, shopCode } = req.body || {};
   if (!email || !password || !shopCode) {
@@ -135,7 +130,6 @@ app.post('/api/auth/login', (req, res) => {
   });
 });
 
-// ================= EMPLOYEES =================
 app.get('/api/employees', authMiddleware, (req, res) => {
   const rows = db.prepare('SELECT id, employee_id, full_name, email, role, is_active, phone_number, hire_date, last_login FROM employees WHERE shop_id = ? ORDER BY id')
     .all(req.user.shopId);
@@ -202,7 +196,6 @@ app.delete('/api/employees/:id', authMiddleware, requireRole('owner'), (req, res
   res.json({ ok: true });
 });
 
-// ================= PRODUCTS =================
 const PRODUCT_FIELDS = ['name', 'reference', 'description', 'category', 'brand', 'supplier', 'supplier_sku',
   'purchase_price', 'selling_price', 'discounted_price', 'quantity', 'min_quantity', 'max_quantity',
   'reorder_point', 'location', 'compatibility', 'warranty_months', 'weight_kg'];
@@ -306,7 +299,6 @@ app.post('/api/products/:id/image', authMiddleware, requireRole('owner', 'manage
   res.json({ imagePath: `/uploads/${rel}` });
 });
 
-// ================= SALES =================
 app.post('/api/sales', authMiddleware, (req, res) => {
   const { items, discountAmount = 0, discountPercentage = 0, amountPaid, paymentMethod = 'cash', customerName, customerPhone, notes } = req.body || {};
   if (!Array.isArray(items) || items.length === 0) {
@@ -376,7 +368,6 @@ app.post('/api/sales', authMiddleware, (req, res) => {
   }
 });
 
-// ================= DASHBOARD =================
 app.get('/api/dashboard', authMiddleware, (req, res) => {
   const shopId = req.user.shopId;
   const todaySales = db.prepare("SELECT COALESCE(SUM(total), 0) AS v, COUNT(*) AS c FROM sales WHERE shop_id = ? AND date(sold_at) = date('now')").get(shopId);
@@ -404,7 +395,6 @@ app.get('/api/dashboard', authMiddleware, (req, res) => {
   });
 });
 
-// ================= SETTINGS =================
 app.get('/api/settings', authMiddleware, (req, res) => {
   const rows = db.prepare('SELECT setting_key, setting_value, setting_group FROM settings WHERE shop_id = ?').all(req.user.shopId);
   const obj = {};
@@ -426,7 +416,6 @@ app.put('/api/settings', authMiddleware, requireRole('owner'), (req, res) => {
   res.json({ ok: true });
 });
 
-// ================= SHOP INFO =================
 app.get('/api/shop', authMiddleware, (req, res) => {
   const shop = db.prepare('SELECT shop_code, shop_name FROM shops WHERE id = ?').get(req.user.shopId);
   res.json(shop || {});

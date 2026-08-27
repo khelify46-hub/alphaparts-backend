@@ -4,7 +4,6 @@ const path = require('path');
 const db = new Database(path.join(__dirname, 'shop.db'));
 db.pragma('foreign_keys = ON');
 
-// ========== SHOPS TABLE ==========
 db.exec(`
   CREATE TABLE IF NOT EXISTS shops (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -15,7 +14,6 @@ db.exec(`
   );
 `);
 
-// ========== EMPLOYEES TABLE ==========
 db.exec(`
   CREATE TABLE IF NOT EXISTS employees (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,7 +34,6 @@ db.exec(`
   );
 `);
 
-// ========== PRODUCTS TABLE ==========
 db.exec(`
   CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,7 +70,6 @@ db.exec(`
   );
 `);
 
-// ========== SALES TABLE ==========
 db.exec(`
   CREATE TABLE IF NOT EXISTS sales (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,7 +96,6 @@ db.exec(`
   );
 `);
 
-// ========== SALE ITEMS ==========
 db.exec(`
   CREATE TABLE IF NOT EXISTS sale_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -115,7 +110,6 @@ db.exec(`
   );
 `);
 
-// ========== STOCK MOVEMENTS ==========
 db.exec(`
   CREATE TABLE IF NOT EXISTS stock_movements (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,7 +125,6 @@ db.exec(`
   );
 `);
 
-// ========== SETTINGS ==========
 db.exec(`
   CREATE TABLE IF NOT EXISTS settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -145,7 +138,6 @@ db.exec(`
   );
 `);
 
-// ========== NOTIFICATIONS ==========
 db.exec(`
   CREATE TABLE IF NOT EXISTS notifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -161,7 +153,6 @@ db.exec(`
   );
 `);
 
-// ========== ACTIVITY LOG ==========
 db.exec(`
   CREATE TABLE IF NOT EXISTS activity_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -177,7 +168,6 @@ db.exec(`
   );
 `);
 
-// ========== INDEXES ==========
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_products_shop_reference ON products(shop_id, reference);
   CREATE INDEX IF NOT EXISTS idx_products_shop_name ON products(shop_id, name);
@@ -185,7 +175,6 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sales_shop_date ON sales(shop_id, sold_at);
 `);
 
-// ========== HELPERS ==========
 function generateShopCode() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let code;
